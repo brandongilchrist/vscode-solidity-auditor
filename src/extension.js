@@ -35,9 +35,9 @@ const docSelector = settings.docSelector;
 const g_workspace = new mod_parser.Workspace(
   vscode.workspace.workspaceFolders.map((wf) => wf.uri.fsPath),
 );
-var activeEditor;
-var g_diagnostics;
-var g_debounce = {
+let activeEditor;
+let g_diagnostics;
+const g_debounce = {
   timerId: undefined,
   armed: false,
   wait: 500
@@ -74,7 +74,7 @@ function onInitModules(context, type) {
   //globals init
   g_diagnostics = new DiliDiagnosticCollection(
     context,
-    vscode.workspace.rootPath,
+    (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]) ? vscode.workspace.workspaceFolders[0].uri.fsPath : undefined,
   );
 }
 
