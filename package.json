@@ -17,7 +17,7 @@
   "publisher": "tintinweb",
   "icon": "images/icon.png",
   "engines": {
-    "vscode": "^1.26.2"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "Programming Languages"
@@ -545,13 +545,16 @@
     "tintinweb.vscode-ethover"
   ],
   "scripts": {
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "node ./test/runTest.js"
   },
   "dependencies": {
-    "solidity-workspace": "^0.2.1",
-    "surya": "^0.4.6"
+    "solidity-workspace": "^0.3.1",
+    "surya": "^0.4.13"
   },
   "devDependencies": {
-    "prettier": "^3.0.3"
+    "prettier": "^3.6.2",
+    "mocha": "^10.0.0",
+    "@vscode/test-electron": "^2.3.0"
   }
 }

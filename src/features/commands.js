@@ -71,7 +71,7 @@ const suryaDefaultColorSchemeDark = {
 };
 
 function runCommand(cmd, args, env, cwd, stdin) {
-  cwd = cwd || vscode.workspace.rootPath;
+  cwd = cwd || (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]) ? vscode.workspace.workspaceFolders[0].uri.fsPath : undefined;
 
   return new Promise((resolve, reject) => {
     console.log(`running command: ${cmd} ${args.join(" ")}`);
@@ -130,11 +130,8 @@ class Commands {
       );
     }
 
-    vscode.workspace
-      .openTextDocument({ content: content, language: "javascript" })
-      .then((doc) =>
-        vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside),
-      );
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: "javascript" });
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
   }
 
   async surya(documentOrListItems, command, args) {
@@ -414,15 +411,14 @@ class Commands {
   }
 
   async _findTopLevelContracts(files, scanfiles, workspaceRelativeBaseDirs) {
-    var that = this;
-    var dependencies = {};
-    var contractToFile = {};
+    const dependencies = {};
+    const contractToFile = {};
     if (!scanfiles) {
       workspaceRelativeBaseDirs = Array.isArray(workspaceRelativeBaseDirs)
         ? workspaceRelativeBaseDirs
         : [workspaceRelativeBaseDirs];
 
-      let searchFileString =
+      const searchFileString =
         "{" +
         workspaceRelativeBaseDirs
           .map((d) =>
@@ -431,34 +427,30 @@ class Commands {
           .join(",") +
         "}";
 
-      await vscode.workspace
-        .findFiles(searchFileString, settings.DEFAULT_FINDFILES_EXCLUDES, 500)
-        .then(async (solfiles) => {
-          await solfiles.forEach(async (solfile) => {
-            try {
-              //let content = fs.readFileSync(solfile.fsPath).toString('utf-8');
-              //let sourceUnit = that.g_parser.parseSourceUnit(content);
+      const solfiles = await vscode.workspace
+        .findFiles(searchFileString, settings.DEFAULT_FINDFILES_EXCLUDES, 500);
 
-              let sourceUnit = await that.g_workspace.add(solfile.fsPath);
+      for (const solfile of solfiles) {
+        try {
+          const sourceUnit = await this.g_workspace.add(solfile.fsPath);
 
-              for (let contractName in sourceUnit.contracts) {
-                if (
-                  sourceUnit.contracts[contractName]._node.kind == "interface"
-                ) {
-                  //ignore interface contracts
-                  continue;
-                }
-                dependencies[contractName] =
-                  sourceUnit.contracts[contractName].dependencies;
-                contractToFile[contractName] = solfile;
-              }
-            } catch (e) {}
-          });
-        });
+          for (const contractName in sourceUnit.contracts) {
+            if (
+              sourceUnit.contracts[contractName]._node.kind == "interface"
+            ) {
+              //ignore interface contracts
+              continue;
+            }
+            dependencies[contractName] =
+              sourceUnit.contracts[contractName].dependencies;
+            contractToFile[contractName] = solfile;
+          }
+        } catch (e) { }
+      }
     } else {
       //files not set: take loaded sourceUnits from this.g_workspace
       //files set: only take these sourceUnits
-      await this.g_workspace
+      this.g_workspace
         .getAllContracts()
         .filter((c) => c._node.kind != "interface" && c._node.kind != "library")
         .forEach((c) => {
@@ -466,13 +458,13 @@ class Commands {
         });
     }
 
-    var depnames = [].concat.apply([], Object.values(dependencies));
+    const depnames = [].concat.apply([], Object.values(dependencies));
 
-    let topLevelContracts = Object.keys(dependencies).filter(function (i) {
+    const topLevelContracts = Object.keys(dependencies).filter(function (i) {
       return depnames.indexOf(i) === -1;
     });
 
-    let ret = {};
+    const ret = {};
     topLevelContracts.forEach((contractName) => {
       ret[contractName] = contractToFile[contractName];
     });
@@ -480,55 +472,45 @@ class Commands {
   }
 
   async findTopLevelContracts(files, scanfiles) {
-    let topLevelContracts = await this._findTopLevelContracts(files, scanfiles);
+    const topLevelContracts = await this._findTopLevelContracts(files, scanfiles);
 
-    let topLevelContractsText = Object.keys(topLevelContracts).join("\n");
+    const topLevelContractsText = Object.keys(topLevelContracts).join("\n");
     /*
         for (var name in topLevelContracts) {
             topLevelContractsText += name + ' (' + topLevelContracts[name]+')\n';
         }
         */
 
-    let content = `
+    const content = `
 Top Level Contracts
 ===================
 
 ${topLevelContractsText}`;
-    vscode.workspace
-      .openTextDocument({ content: content, language: "markdown" })
-      .then((doc) =>
-        vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside),
-      );
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: "markdown" });
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
   }
 
   async solidityFlattener(files, callback, showErrors) {
     switch (settings.extensionConfig().flatten.mode) {
       case "truffle":
-        vscode.extensions
-          .getExtension("tintinweb.vscode-solidity-flattener")
-          .activate()
-          .then(
-            (active) => {
-              vscode.commands
-                .executeCommand("vscode-solidity-flattener.flatten", {
-                  files: files,
-                  callback: callback,
-                  showErrors: showErrors,
-                })
-                .catch((error) => {
-                  // command not available
-                  vscode.window.showWarningMessage(
-                    "Error running `tintinweb.vscode-solidity-flattener`. Please make sure the extension is installed.\n" +
-                      error,
-                  );
-                });
-            },
-            (err) => {
-              throw new Error(
-                `Solidity Auditor: Failed to activate "tintinweb.vscode-solidity-flattener". Make sure the extension is installed from the marketplace. Details: ${err}`,
-              );
+        try {
+          await vscode.extensions
+            .getExtension("tintinweb.vscode-solidity-flattener")
+            .activate();
+          await vscode.commands.executeCommand(
+            "vscode-solidity-flattener.flatten",
+            {
+              files: files,
+              callback: callback,
+              showErrors: showErrors,
             },
           );
+        } catch (error) {
+          vscode.window.showWarningMessage(
+            "Error running `tintinweb.vscode-solidity-flattener`. Please make sure the extension is installed.\n" +
+            error,
+          );
+        }
         break;
       default:
         this.flattenInternal(files, callback, showErrors);
@@ -536,29 +518,26 @@ ${topLevelContractsText}`;
     }
   }
 
-  flattenInternal(files, callback, showErrors) {
-    files.forEach(async (uri) => {
+  async flattenInternal(files, callback, showErrors) {
+    for (const uri of files) {
       let sourceUnit = this.g_workspace.sourceUnits[uri.fsPath]; //get sourceUnit object
       sourceUnit = sourceUnit || (await this.g_workspace.add(uri.fsPath)); //retry & force analysis
       if (!sourceUnit) {
         return;
       }
       try {
-        let flat = sourceUnit.flatten();
+        const flat = sourceUnit.flatten();
         if (callback) {
           callback(uri.fsPath, undefined, flat);
         } else {
-          vscode.workspace
-            .openTextDocument({ content: flat, language: "solidity" })
-            .then((doc) =>
-              vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside),
-            );
+          const doc = await vscode.workspace.openTextDocument({ content: flat, language: "solidity" });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         }
       } catch (e) {
         console.warn(`ERROR - flattening file: ${uri}`);
         console.error(e);
       }
-    });
+    }
   }
 
   async flaterra(documentOrUri, noTryInstall) {
@@ -568,91 +547,68 @@ ${topLevelContractsText}`;
       docUri = documentOrUri.uri;
     }
 
-    let cmd = "python3";
-    let args = [
+    const cmd = "python3";
+    const args = [
       "-m",
       "flaterra",
       "--contract",
       vscode.workspace.asRelativePath(docUri),
     ];
 
-    runCommand(cmd, args)
-      .then(
-        (success) => {
-          vscode.window.showInformationMessage(
-            `Contract flattened: ${path.basename(
-              docUri.fsPath,
-              ".sol",
-            )}_flat.sol`,
+    try {
+      await runCommand(cmd, args);
+      vscode.window.showInformationMessage(
+        `Contract flattened: ${path.basename(
+          docUri.fsPath,
+          ".sol",
+        )}_flat.sol`,
+      );
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        vscode.window.showErrorMessage(
+          "'`flaterra` failed with error: unable to execute python3",
+        );
+      } else if (err.stderr.indexOf(": No module named flaterra") >= 0) {
+        if (!noTryInstall) {
+          const selection = await vscode.window.showWarningMessage(
+            "Contract Flattener `flaterra` is not installed.\n run `pip3 install flaterra --user` to install? ",
+            "Install",
           );
-        },
-        (err) => {
-          if (err.code === "ENOENT") {
-            vscode.window.showErrorMessage(
-              "'`flaterra` failed with error: unable to execute python3",
-            );
-          } else if (err.stderr.indexOf(": No module named flaterra") >= 0) {
-            if (!noTryInstall) {
-              vscode.window
-                .showWarningMessage(
-                  "Contract Flattener `flaterra` is not installed.\n run `pip3 install flaterra --user` to install? ",
-                  "Install",
-                )
-                .then((selection) => {
-                  if (selection == "Install") {
-                    runCommand(
-                      "pip3",
-                      ["install", "flaterra", "--user"],
-                      undefined,
-                      undefined,
-                      "y\n",
-                    )
-                      .then(
-                        (success) => {
-                          vscode.window.showInformationMessage(
-                            "Successfully installed flaterra.",
-                          );
-                          this.flaterra(documentOrUri, true);
-                        },
-                        (error) => {
-                          vscode.window.showErrorMessage(
-                            "Failed to install flaterra.",
-                          );
-                        },
-                      )
-                      .catch((err) => {
-                        vscode.window.showErrorMessage(
-                          "Failed to install flaterra. " + err,
-                        );
-                      });
-                  } else {
-                    // do not retry
-                  }
-                });
+          if (selection === "Install") {
+            try {
+              await runCommand(
+                "pip3",
+                ["install", "flaterra", "--user"],
+                undefined,
+                undefined,
+                "y\n",
+              );
+              vscode.window.showInformationMessage(
+                "Successfully installed flaterra.",
+              );
+              this.flaterra(documentOrUri, true);
+            } catch (error) {
+              vscode.window.showErrorMessage(
+                "Failed to install flaterra. " + error,
+              );
             }
-          } else {
-            vscode.window
-              .showErrorMessage("`flaterra` failed with: " + err)
-              .then((selection) => {
-                console.log(selection);
-              });
           }
-        },
-      )
-      .catch((err) => {
-        console.log("runcommand threw exception: " + err);
-      });
+        }
+      } else {
+        vscode.window.showErrorMessage("`flaterra` failed with: " + err);
+      }
+    }
   }
 
   async flattenCandidates(candidates) {
     // takes object key=contractName value=fsPath
-    let topLevelContracts = candidates || (await this._findTopLevelContracts());
+    const topLevelContracts = candidates || (await this._findTopLevelContracts());
     let content = "";
 
     this.solidityFlattener(
       Object.values(topLevelContracts),
       (filepath, trufflepath, content) => {
-        let outpath = path.parse(filepath);
+        const outpath = path.parse(filepath);
 
         fs.writeFile(
           path.join(outpath.dir, "flat_" + outpath.base),
@@ -666,30 +622,26 @@ ${topLevelContractsText}`;
       },
     );
 
-    for (let name in topLevelContracts) {
+    for (const name in topLevelContracts) {
       //this.flaterra(new vscode.Uri(topLevelContracts[name]))
-      let outpath = path.parse(topLevelContracts[name].fsPath);
-      let outpath_flat = vscode.Uri.file(
+      const outpath = path.parse(topLevelContracts[name].fsPath);
+      const outpath_flat = vscode.Uri.file(
         path.join(outpath.dir, "flat_" + outpath.base),
       );
       content += `${
         !fs.existsSync(outpath_flat.fsPath) ? "[ERR]   " : ""
       }${name}  =>  ${outpath_flat} \n`;
     }
-    vscode.workspace
-      .openTextDocument({ content: content, language: "markdown" })
-      .then((doc) =>
-        vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside),
-      );
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: "markdown" });
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
   }
 
   async listFunctionSignatures(document, asJson) {
-    this.g_workspace.add(document.fileName).then(async (sourceUnit) => {
-      const signatures = await this._signatureForAstItem(
-        Object.values(sourceUnit.contracts),
-      );
-      await this.revealSignatures(signatures, asJson ? "json" : undefined);
-    });
+    const sourceUnit = await this.g_workspace.add(document.fileName);
+    const signatures = await this._signatureForAstItem(
+      Object.values(sourceUnit.contracts),
+    );
+    await this.revealSignatures(signatures, asJson ? "json" : undefined);
   }
 
   async listFunctionSignaturesForWorkspace(asJson) {
@@ -698,13 +650,10 @@ ${topLevelContractsText}`;
     // 3) wait for parser to finish
     // 4) get all function signatures
     // -- this is kinda resource intensive 🤷‍♂️
-    await vscode.workspace
-      .findFiles("**/*.sol", settings.DEFAULT_FINDFILES_EXCLUDES, 500)
-      .then((uris) => {
-        uris.forEach((uri) => {
-          this.g_workspace.add(uri.fsPath);
-        });
-      });
+    const uris = await vscode.workspace.findFiles("**/*.sol", settings.DEFAULT_FINDFILES_EXCLUDES, 500);
+    uris.forEach((uri) => {
+        this.g_workspace.add(uri.fsPath);
+    });
     await this.g_workspace.withParserReady(undefined, true);
     console.log("done");
     const signatures = await this._signatureForAstItem(
@@ -736,7 +685,7 @@ ${topLevelContractsText}`;
 
   async revealSignatures(signatures, format) {
     format = format || "markdown";
-    let errs = [];
+    const errs = [];
 
     const res = {};
 
@@ -792,56 +741,35 @@ ${topLevelContractsText}`;
         }
     }
 
-    vscode.workspace
-      .openTextDocument({ content: content, language: format })
-      .then((doc) =>
-        vscode.window.showTextDocument(doc, {
-          viewColumn: vscode.ViewColumn.Beside,
-          preview: true,
-        }),
-      );
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: format });
+    await vscode.window.showTextDocument(doc, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preview: true,
+    });
   }
 
   async drawioContractsOutlineAsCSV(contractObj) {
     const writer = new DrawIoCsvWriter();
     const content = writer.export(contractObj);
 
-    vscode.workspace
-      .openTextDocument({ content: content, language: "csv" })
-      .then((doc) =>
-        vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside),
-      );
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: "csv" });
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
   }
 
   async umlContractsOutline(contractObjects) {
-    let writer = new PlantumlWriter();
+    const writer = new PlantumlWriter();
     const content = writer.export(contractObjects);
 
-    vscode.workspace
-      .openTextDocument({ content: content, language: "plantuml" })
-      .then((doc) =>
-        vscode.window
-          .showTextDocument(doc, vscode.ViewColumn.Beside)
-          .then((editor) => {
-            vscode.extensions
-              .getExtension("jebbs.plantuml")
-              .activate()
-              .then(
-                (active) => {
-                  vscode.commands
-                    .executeCommand("plantuml.preview")
-                    .catch((error) => {
-                      //command does not exist
-                    });
-                },
-                (err) => {
-                  console.warn(
-                    `Solidity Auditor: Failed to activate "jebbs.plantuml". Make sure the extension is installed from the marketplace. Details: ${err}`,
-                  );
-                },
-              );
-          }),
+    const doc = await vscode.workspace.openTextDocument({ content: content, language: "plantuml" });
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    try {
+      await vscode.extensions.getExtension("jebbs.plantuml").activate();
+      await vscode.commands.executeCommand("plantuml.preview");
+    } catch (err) {
+      console.warn(
+        `Solidity Auditor: Failed to activate "jebbs.plantuml". Make sure the extension is installed from the marketplace. Details: ${err}`,
       );
+    }
   }
 }
 
